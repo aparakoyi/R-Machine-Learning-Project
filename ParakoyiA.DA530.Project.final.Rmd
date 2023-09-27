@@ -1,0 +1,441 @@
+---
+title: "ParakoyiA.DA5030.Project"
+author: "Abigail (Abby) Parakoyi"
+output:
+  html_document:
+    df_print: paged
+---
+
+## Installing Packages 
+```{r}
+# Install Packages
+install.packages('gsheet', repos='http://cran.us.r-project.org')
+install.packages("tidyverse",  repos='http://cran.us.r-project.org')
+install.packages("caret",repos='http://cran.us.r-project.org')
+install.packages("MASS",repos='http://cran.us.r-project.org')
+install.packages("rpart",repos='http://cran.us.r-project.org')
+install.packages("gmodels",repos='http://cran.us.r-project.org')
+install.packages("Cubist", repos='http://cran.us.r-project.org')
+install.packages("neuralnet", repos='http://cran.us.r-project.org')
+
+
+# loading package
+library(tidyverse)
+library(caret)
+library(MASS)
+library(rpart)
+library(gmodels)
+library(Cubist)
+library(neuralnet)
+library(gsheet)
+
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Data Understanding
+### In this section I will be exploring the data to detect outliers, missing values as well as look at the dirtibution and correlation of my traget variable to the other variables. 
+```{r}
+# loading data 
+## Data collected from Kaggle data base and should be within your Downloads folder as a zipped document 
+GIdata <-gsheet2tbl("https://docs.google.com/spreadsheets/d/1UT-mkzliF3sEXNllI4rzRWlM4P6jjbqH9FJXZIPMGgI/edit#gid=1292094241")
+
+# checking data 
+head(GIdata)
+str(GIdata)
+
+# replacing all empty spaces with NA values 
+GIdata <- replace(GIdata, GIdata=="", NA)
+
+# changing Human_development column to factor column 
+GIdata$Human_development <- as.factor(GIdata$Human_development)
+levels(GIdata$Human_development) # there seems to be empty spaces in this column that will need to be removed 
+
+
+# getting summary stats on data 
+summary(GIdata)
+
+# getting missing values and positions 
+colSums(is.na(GIdata))
+which(colSums(is.na(GIdata))>0)
+## Based on missing value detection the data holds 9 columns with missing data with the rank and GII columns tried for highest 
+
+# getting outliers 
+## Visually graphing out all data points except country column to see outliers variables
+og <- boxplot(GIdata[,-1], main = "Outlier Boxplot", xaxt = "n") 
+par(cex.axis = 1)
+tick <- seq_along(og$names)
+axis(1, at = tick, labels = FALSE)
+text(tick, par("usr")[3] - 0.3, og$names, srt = 35, xpd = TRUE, adj = 1)
+## Based upon the outlier detection the maternal mortality column holds the highest amount of outliers in the data set. Next would be the adolescent birth rate column, followed by the female labor force and male labor force columns. 
+
+# getting correlation of data 
+## Visually representing the correlation of the data 
+# dev.off()
+GIdata_num <- GIdata[,-1]
+GIdata_num$Human_development <- as.numeric(GIdata_num$Human_development)
+GIdata_nona<- GIdata_num[complete.cases(GIdata_num),]
+library(RColorBrewer)
+GIdata_correlation <-cor(GIdata_nona)
+Correlation_plot <- corrplot::corrplot(GIdata_correlation, type="upper", order="hclust", number.cex = 0.75, addCoef.col="grey", 
+         col=brewer.pal(n=8, name="RdYlBu"))
+## In terms of correlinarity within the the data rank and GII are corlienar to each other so removal of one of them will be necessary. In the case of this data set I will be excluding rank as a predictive measure for GII. There is a high positive correlation of GII between maternal mortality and adolescent birth rate. There is a high negative correlation between female secondary education and male secondary education. Lastly GII is modestly correlated with seats in parliament and human development. This tells me that these features maybe the best features to use to predict my target variable GIII. 
+
+# getting distribution of the data 
+## visually representing distribution of data 
+par(mar=c(1,1,1,1))
+par(mfrow=c(5, 5))
+colnames <- dimnames(GIdata_num)[[2]]
+histogram_plot <- for (i in 1:10) {
+    hist(unlist(GIdata_num[,i]), xlim=c(0, 1200), breaks=seq(0, 1200, 75),  main=colnames[i], probability=TRUE, col="black", border="white")
+}
+## Based upon the histogram of the data as expected from the outlier test the maternal mortality column has the highest variance of distribution with a positive skew. The adolescent birth rate column also has a slight positive skew all other columns seem fairly normally distributed. 
+```
+## Data Preparation 
+### In this section I will be preprocessing the data (handling missing values and outliers), standardizing the data (z-score standardization), encode categorical data (Human development column), randomly split data to training and validation set 
+```{r}
+# Preprocessing data 
+# splitting data into 70% training and 30% testing 
+GIdata_train <- sample_frac(GIdata, .70, replace = F)
+GIdata_test <- sample_frac(GIdata, .30, replace = F)
+
+# Handling the missing values 
+# mean for continuous columns in training (only with missing values)
+Maternal_mortality_mn_train <- mean(na.omit(GIdata_train$Maternal_mortality))
+Seats_parliament_mn_train <- mean(na.omit(GIdata_train$Seats_parliament))
+F_secondary_educ_mn_train <- mean(na.omit(GIdata_train$F_secondary_educ))
+M_secondary_educ_mn_train <- mean(na.omit(GIdata_train$M_secondary_educ))
+M_Labour_force_mn_train <- mean(na.omit(GIdata_train$M_Labour_force))
+F_Labour_force_mn_train <- mean(na.omit(GIdata_train$F_Labour_force))
+
+# mean for continuous columns in testing (only with missing values)
+Maternal_mortality_mn_test <- mean(na.omit(GIdata_test$Maternal_mortality))
+Seats_parliament_mn_test <- mean(na.omit(GIdata_test$Seats_parliament))
+F_secondary_educ_mn_test <- mean(na.omit(GIdata_test$F_secondary_educ))
+M_secondary_educ_mn_test <- mean(na.omit(GIdata_test$M_secondary_educ))
+M_Labour_force_mn_test <- mean(na.omit(GIdata_test$M_Labour_force))
+F_Labour_force_mn_test <- mean(na.omit(GIdata_test$F_Labour_force))
+
+# median of categorical data for training (only with missing value )
+GIdata_train$Human_development <- as.character(GIdata_train$Human_development)
+Human_development_med_train <- median(na.omit(GIdata_train$Human_development))
+
+# median of categorical data for testing (only with missing value )
+GIdata_test$Human_development <- as.character(GIdata_test$Human_development)
+Human_development_med_test <- median(na.omit(GIdata_test$Human_development))
+
+# Imputing missing values for training 
+GIdata_train$Maternal_mortality[is.na(GIdata_train$Maternal_mortality)] <- Maternal_mortality_mn_train
+GIdata_train$Seats_parliament[is.na(GIdata_train$Seats_parliament)] <- Seats_parliament_mn_train
+GIdata_train$F_secondary_educ[is.na(GIdata_train$F_secondary_educ)] <- F_secondary_educ_mn_train
+GIdata_train$M_secondary_educ[is.na(GIdata_train$M_secondary_educ)] <- M_secondary_educ_mn_train
+GIdata_train$M_Labour_force[is.na(GIdata_train$M_Labour_force)] <- M_Labour_force_mn_train
+GIdata_train$F_Labour_force[is.na(GIdata_train$F_Labour_force)] <- F_Labour_force_mn_train
+GIdata_train$Human_development[is.na(GIdata_train$Human_development)] <- Human_development_med_train
+
+# Imputing missing values for testing 
+GIdata_test$Maternal_mortality[is.na(GIdata_test$Maternal_mortality)] <- Maternal_mortality_mn_test
+GIdata_test$Seats_parliament[is.na(GIdata_test$Seats_parliament)] <- Seats_parliament_mn_test
+GIdata_test$F_secondary_educ[is.na(GIdata_test$F_secondary_educ)] <- F_secondary_educ_mn_test
+GIdata_test$M_secondary_educ[is.na(GIdata_test$M_secondary_educ)] <- M_secondary_educ_mn_test
+GIdata_test$M_Labour_force[is.na(GIdata_test$M_Labour_force)] <- M_Labour_force_mn_test
+GIdata_test$F_Labour_force[is.na(GIdata_test$F_Labour_force)] <- F_Labour_force_mn_test
+GIdata_test$Human_development[is.na(GIdata_test$Human_development)] <- Human_development_med_test
+
+# checking if imputation of missing values worked 
+colSums(is.na(GIdata_train))
+colSums(is.na(GIdata_test))
+
+## Because imputation here could make the learning model inefficient. Because both Rank and GII are collinear to each other I will also be removing  the rank column. 
+GIdata_train <- GIdata_train[,-4]
+GIdata_test <- GIdata_test[,-4]
+
+# removing missing value rows in target column GII 
+GIdata_train <- drop_na(GIdata_train)
+GIdata_test <- drop_na(GIdata_test)
+
+# checking final dim and na 
+dim(GIdata_train)
+dim(GIdata_test)
+colSums(is.na(GIdata_train))
+colSums(is.na(GIdata_test))
+```
+
+```{r}
+# Handling outliers 
+# filtering data by z score value of 3 to detect and remove outliers from the data for train 
+GIdata_train_clean <- GIdata_train %>%
+  mutate_if(is.numeric, ~ (.-mean(.)) / sd(.))
+
+# filtering data by z score value of 3 to detect and remove outliers from the data for test
+GIdata_test_clean <- GIdata_test %>%
+  mutate_if(is.numeric, ~ (.-mean(.)) / sd(.))
+
+# checking dimensions of data 
+dim(GIdata_train_clean)
+dim(GIdata_test_clean)
+```
+
+```{r}
+# encoding categorical column (Human Development)
+# 1 - Low
+# 2 - Very High 
+# 3 - Medium 
+# 4 - High 
+## creating encoding function 
+encode_ordinal <- function(x, order = unique(x)) {
+  x <- as.numeric(factor(x, levels = order, exclude = NULL))
+  x
+}
+
+# creating final data tables 
+GIdata_train_final <- GIdata_train_clean
+GIdata_test_final <- GIdata_test_clean
+
+# encoding data frames 
+GIdata_train_final[["Human_development_encoded"]] <- encode_ordinal(GIdata_train_clean[["Human_development"]])
+GIdata_test_final[["Human_development_encoded"]] <- encode_ordinal(GIdata_test_clean[["Human_development"]])
+
+# checking final data 
+head(GIdata_train_final)
+head(GIdata_test_final)
+
+# for analysis dropping character Human development column 
+GIdata_train_final <- GIdata_train_final[,-2]
+GIdata_test_final <- GIdata_test_final[,-2]
+
+# checking 
+head(GIdata_train_final)
+head(GIdata_test_final)
+```
+## Modeling 
+### In this section I will be using three regression models such as multiple regression, decision trees, and neural nets to determine the GII index of the data set based upon the various features. I decided to use regression models for this task as the traget variable of interest is continuous and categorical models would not be best in this case. Lastly I will also create bagging ensemble of all three models.
+```{r}
+# setting seed 
+set.seed(123)
+
+# dropping country from data sets to avoid issues of singularity 
+GIdata_train_final_reg <- GIdata_train_final[,-1]
+GIdata_test_final_reg <- GIdata_test_final[,-1]
+
+# Constructing multiple regression model with all features in data table 
+GII_model <- lm(GII~ ., data = GIdata_train_final_reg)
+summary(GII_model)
+
+# Using stepAIC to remove all non-significant variables and have a final model equation. 
+GII_model_step <- stepAIC(GII_model)
+GII_model_step$anova
+
+# final Formula 
+GII_mreg_formula <- lm(GII ~ Maternal_mortality + Adolescent_birth_rate + Seats_parliament + F_secondary_educ + F_Labour_force + Human_development_encoded, data = GIdata_train_final_reg)
+summary(GII_mreg_formula)
+
+# evaluating data 
+# predicting data on test data (hold-out method)
+GII_mreg_pred <- predict(GII_mreg_formula, GIdata_test_final_reg[c(2,3,4,5,7,9)])
+GII_mreg_pred$residuals <- GIdata_test_final_reg[,1] - GII_mreg_pred
+
+# calculate RMSE for train and test then check diff 
+mreg_rmse_train <- sqrt(mean(GII_mreg_formula$residuals ** 2)) ; GIdata_train_final_reg
+mreg_rmse_test <- sqrt(mean(GII_mreg_pred$residuals ** 2)) ; GIdata_test_final_reg
+mreg_rmse_train
+mreg_rmse_test
+
+## Based on the RMSE the model does a fairly good job of predicting the actual GII values with ad RMSE of 0.30. 
+
+# doing K-fold cross validation 
+# specifying validation methods 
+ctrl <- trainControl(method = "cv", number = 5) # selected 5 because rule of thumb is tor select between 5 and 10 as show minimal error 
+
+# fitting regression model to k-fold validation 
+mreg_validation <- train(GII ~ Maternal_mortality + Adolescent_birth_rate + Seats_parliament + F_secondary_educ + F_Labour_force + Human_development_encoded, data = GIdata_train_final_reg, method = "lm", trControl = ctrl)
+
+# checking validation 
+print(mreg_validation)
+
+## based upon the stepAIC backward elimination the final multiple regression algorithm equation is GII ~ Maternal_mortality + Adolescent_birth_rate + Seats_parliament + F_secondary_educ + F_Labour_force + Human_development_encoded, dropping the Male education and labour force variables. Based upon the final multiple regression model the features selected account for ~ 90% of the data variance, meaning that the features selected heavily predict the Gender inequality index. Our model also has an RMSE score of about 0.32  meaning that it can predict the outcomes fairly well. According to the MAE of about 0.23 the model can predict the actual values fairly well. 
+```
+```{r}
+# setting seed
+set.seed(123)
+
+# dropping country from data sets to avoid issues of singularity 
+GIdata_train_final_tree <- GIdata_train_final[,-1]
+GIdata_test_final_tree <- GIdata_test_final[,-1]
+
+# Constructing model using the same features as selected the the stepAIC function in the multiple regression model  
+GIdata_rpart <- rpart(GII ~ Maternal_mortality + Adolescent_birth_rate + Seats_parliament + F_secondary_educ + F_Labour_force + Human_development_encoded, data = GIdata_train_final_tree)
+
+# plotting the regression decision tree 
+GIdata_rpart_plot <- rpart.plot::rpart.plot(GIdata_rpart, digits = 6)
+
+# evaluating the model 
+# predicting on test data 
+GIdata_tree_pred <- predict(GIdata_rpart, GIdata_test_final_tree)
+
+# doing K-fold cross validation 
+# specifying validation methods 
+ctrl <- trainControl(method = "repeatedcv", number = 5) # selected 5 because rule of thumb is tor select between 5 and 10 as show minimal error 
+
+# fitting regression model to k-fold validation 
+tree_validation1 <- train(GII ~ Maternal_mortality + Adolescent_birth_rate + Seats_parliament + F_secondary_educ + F_Labour_force + Human_development_encoded, data = GIdata_train_final_tree, method = "rpart", trControl = ctrl)
+
+# checking validation 
+tree1 <- print(tree_validation1)
+tree1
+
+## Based upon the k-fold validation of this tree model the RMSE, R-squared and MAE are higher than the multiple regression model with increasing value as the cp value increases. Further improvement is needed 
+
+# Improving the model 
+GIdata_cubist <- cubist(GIdata_train_final_tree[,-c(1,6,8)],GIdata_train_final_tree$GII)
+
+# testing on test data 
+GIdata_tree_cubist_pred <- predict(GIdata_cubist, GIdata_test_final_tree)
+
+# specifying validation methods 
+ctrl <- trainControl(method = "repeatedcv", number = 5) # selected 5 because rule of thumb is tor select between 5 and 10 as show minimal error 
+
+# fitting regression model to k-fold validation 
+tree_validation2 <- train(GIdata_train_final_tree[,-c(1,6,8)],GIdata_train_final_tree$GII, data = GIdata_train_final_reg, method = "cubist", trControl = ctrl)
+
+# checking validation 
+tree2 <- print(tree_validation2)
+tree2 
+
+## Based upon the k-fold validation the RMSE of the cubist tree model this model is better than the previous tree model with an RMSE of ranging from about 0.23 to 0.19  which thus far is leading amongst the two models is the smallest. Regarding R-squared the model is ranging between 0.94 and 0.95 showing high accuracy for prediction and lastly the MAE ranges from about 0.14 to 0.11 which informs us that the model can get pretty close to getting the actual observed values. Essentially what this means is that we can have some confidence in this decision tree model to accurately determine the GII of a country based upon Maternal_mortality + Adolescent_birth_rate + Seats_parliament + F_secondary_educ + F_Labour_force + Human_development_encoded. 
+```
+```{r}
+# set seed
+set.seed(123)
+
+# creating neural net model 
+# creating new test and train data set for neural network 
+GIdata_train_final_net <- GIdata_train_final[,-1]
+GIdata_test_final_net <- GIdata_test_final[,-1]
+
+# training model 
+GIdata_net_model <- neuralnet(GII ~ Maternal_mortality + Adolescent_birth_rate + Seats_parliament + F_secondary_educ + F_Labour_force + Human_development_encoded, data = GIdata_train_final_net, linear.output = T)
+
+# visualize plot 
+plot(GIdata_net_model, rep = "best")
+
+# Evaluating the model 
+# get the model results 
+GIdata_model_results <- compute(GIdata_net_model, GIdata_test_final_net[,-1])
+
+# get the predicted results 
+GIdata_predicted_GII <- GIdata_model_results$net.result
+
+# doing K-fold cross validation 
+# specifying validation methods 
+ctrl <- trainControl(method = "cv", number = 5) # selected 5 because rule of thumb is tor select between 5 and 10 as show minimal error 
+
+# fitting neural network  model to k-fold validation 
+net_validation1 <- train(GII ~ Maternal_mortality + Adolescent_birth_rate + Seats_parliament + F_secondary_educ + F_Labour_force + Human_development_encoded, data = GIdata_train_final_net, method = "neuralnet", trControl = ctrl)
+
+# checking validation 
+print(net_validation1)
+
+# Improving model 
+# adding in hidden layers that are between 1 and the number of inputs which is 6. I will be trying 2 different values for hidden layers and select the one with a lower RMSE. 
+
+# hidden layer = 3 model 
+GIdata_net_model2 <- neuralnet(GII ~ Maternal_mortality + Adolescent_birth_rate + Seats_parliament + F_secondary_educ + F_Labour_force + Human_development_encoded, data = GIdata_train_final_net, hidden = 3, linear.output = T)
+
+# visualize model 
+plot(GIdata_net_model2, rep = "best")
+
+# evaluate model 
+GIdata_model_results2 <- compute(GIdata_net_model2, GIdata_test_final_net[,-1])
+GIdata_predicted_GII2 <- GIdata_model_results2$net.result
+
+# hidden layer = 5 model 
+GIdata_net_model3 <- neuralnet(GII ~ Maternal_mortality + Adolescent_birth_rate + Seats_parliament + F_secondary_educ + F_Labour_force + Human_development_encoded, data = GIdata_train_final_net, hidden = 5, linear.output = T)
+
+# visualize model 
+plot(GIdata_net_model3, rep = "best")
+
+# evaluate model 
+GIdata_model_results3 <- compute(GIdata_net_model3, GIdata_test_final_net[,-1])
+GIdata_predicted_GII3 <- GIdata_model_results3$net.result
+
+# doing K-fold cross validation 
+# specifying validation methods 
+ctrl <- trainControl(method = "cv", number = 5) # selected 5 because rule of thumb is tor select between 5 and 10 as show minimal error 
+
+# fitting neural network model to k-fold validation 
+net_validation <- train(GII ~ Maternal_mortality + Adolescent_birth_rate + Seats_parliament + F_secondary_educ + F_Labour_force + Human_development_encoded, data = GIdata_train_final_net, method = "neuralnet", trControl = ctrl)
+
+# checking validation 
+net_validation_plot <- print(net_validation)
+net_validation_plot
+
+## Based on the K-cross validation the use of 3 hidden layers would be optimal to getting the best predicted outcome for GII. Having 3 hidden layers has the lowest RMSE of about 0.20, the highest r-squared value of about 0.95 and the lowest MAE value of about 0.14, which in comparison to the other two values for hidden layers is the best. 
+```
+```{r}
+## Model Evaluations 
+### Based upon the three individual models, multiple regression, decision tree, and neural network, I would select the decision tree model as that model help the lowest RMSE when using 5 neighbors and 20 committees as well as MAE and R-squared. Second to the decision tree model I would recommend the neural network model with the caveat that this model is quite time expensive and if bigger data samples where used efficiency issues will arise. 
+```
+
+## Making Ensemble Model 
+```{r}
+# setting seed
+set.seed(123)
+
+# Creating bagged ensemble with multiple regression, decision tree, and neural network 
+ensemble_function <- function(x) {
+  # setting traincontrol and metric measure 
+  control <- trainControl(method="repeatedcv", number=10, repeats=3)
+  m <- "RMSE"
+
+  # multiple regression model 
+  mreg_fit <- train(GII ~ Maternal_mortality + Adolescent_birth_rate + Seats_parliament + F_secondary_educ + F_Labour_force + Human_development_encoded, data = x, method = "lm", trControl = control, metric = m)
+
+  # decision tree 
+  tree_fit <- train(GII ~ Maternal_mortality + Adolescent_birth_rate + Seats_parliament + F_secondary_educ + F_Labour_force + Human_development_encoded, data = x, method = "rpart", trControl = control, metric = m)
+
+  # neural netwrok 
+  net_fit <- train(GII ~ Maternal_mortality + Adolescent_birth_rate + Seats_parliament + F_secondary_educ + F_Labour_force + Human_development_encoded, data = x, method = "neuralnet", trControl = control, metric = m)
+
+  # summarize results 
+  ensemble_bagging_results <- resamples(list(mreg =mreg_fit, tree=tree_fit, net=net_fit))
+  print(summary(ensemble_bagging_results))
+  
+  # comparing lowest RMSE values 
+  mreg_RMSE_row <- which.min(ensemble_bagging_results$values[,3])
+  mreg_RMSE_lowest <- ensemble_bagging_results$values[mreg_RMSE_row,3]
+  print(paste0("Multiple Regression RMSE Score: ", round(mreg_RMSE_lowest,2)))
+
+  tree_RMSE_row <- which.min(ensemble_bagging_results$values[,6])
+  tree_RMSE_lowest <- ensemble_bagging_results$values[tree_RMSE_row,6]
+  print(paste0("Regression Decision Tree RMSE Score: ", round(tree_RMSE_lowest,2)))
+
+  net_RMSE_row <- which.min(ensemble_bagging_results$values[,9])
+  net_RMSE_lowest <- ensemble_bagging_results$values[net_RMSE_row,9]
+  print(paste0("Neural Network RMSE Score: ", round(net_RMSE_lowest,2)))
+}
+
+# getting data set with no country column 
+GIdata_train_final_clean <- GIdata_train_final[,-1]
+GIdata_test_final_clean <- GIdata_test_final[,-1]
+
+# running function on train and test set 
+ensemble_function(GIdata_train_final_clean)
+ensemble_function(GIdata_test_final_clean)
+
+## Through the use of the bagging ensemble model there is an overall improvement of the overall accuracy and precision of the model based upon the significantly lower RMSE scores compared to the individual stand alone models. We see that in the test data in terms of prediction the RMSE reduced with the lowest being neural network with an RMSE of 0.1 lower than its standalone score of 0.20. Based upon these findings I would suggest using the ensemble as it really enables the more accuracy in predicting the actual test values in the data. 
+
+```
+### Final Thoughts & Summary 
+_Based upon all the analysis above I would ultimately recommend using the ensemble bagging model when attempting to predict the value of the gender inequality index (GII), based upon the select features maternal mortality rate, adolescent birth rate, seats in parliament occupied by women, female secondary education, female labor force, and level of  human development. The ensemble bagging model produced the lowest overall value of the root means squared error (RMSE), indicating a higher probability of being more accurate to predict the actual GII value.The ensemble model was reconstructed using a multiple regression, regression decisions tree, and neural network model, regarding RMSE in ensemble model they resulted in scores of 0.19, 0.23, and 0.1 respectively. These ensemble RMSE scores of each model were significantly lower than their stand alone RMSE scores of 0.32, 0.19, and 0.20 respectively. Regarding the models stand alone and not in an ensemble as mentioned above I would recommend the regression decision tree model for use as it scores the lowest RMSE score of 0.19 and is less time consuming in comparison to the neural network which would became an issue in the face of larger data sets. _
+
+
+
+
+
+
+
+
+
