@@ -1,4 +1,4 @@
-# R-Machine-Learning-Project
+# Machine Learning Classification of Variables Needed to Determine Gender Inequality Index (GII). 
 ## Abigail Parakoyi 
 
 # Overview 
